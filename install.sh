@@ -127,13 +127,27 @@ fi
 mv -f "$staged_path" "$install_dir/$installed_name"
 binary="$install_dir/$installed_name"
 
-shell_name=${SHELL##*/}
+shell_name=${FAK_SHELL:-}
+if [ -z "$shell_name" ] && command -v ps >/dev/null 2>&1; then
+    # `curl | sh` runs this script as a child of the interactive shell. Read
+    # that parent so Fish or PowerShell launched from another login shell is
+    # configured correctly too.
+    shell_name=$(ps -p "$PPID" -o comm= 2>/dev/null || true)
+fi
+[ -n "$shell_name" ] || shell_name=${SHELL##*/}
+shell_name=${shell_name##*/}
+case "$shell_name" in
+    *.exe) shell_name=${shell_name%.exe} ;;
+esac
+shell_name=$(printf '%s' "$shell_name" | tr '[:upper:]' '[:lower:]')
 if [ "$install_dir" = "$HOME_DIR/.local/bin" ]; then
     path_line='export PATH="$HOME/.local/bin:$PATH"'
 else
     path_line="export PATH='$install_dir':"\$PATH""
 fi
 hook_line='eval "$(command fak --alias)"'
+startup_path_line=$path_line
+startup_hook_line=$hook_line
 
 ensure_line() {
     file=$1
@@ -151,13 +165,13 @@ ensure_line() {
 
 setup_shell_file() {
     file=$1
-    if ensure_line "$file" "$path_line" && \
-       (grep -Fq 'fak --alias' "$file" 2>/dev/null || ensure_line "$file" "$hook_line"); then
+    if ensure_line "$file" "$startup_path_line" && \
+       (grep -Fq 'fak --alias' "$file" 2>/dev/null || ensure_line "$file" "$startup_hook_line"); then
         say "Shell integration added to $file"
     else
         warn "could not update $file; add these lines manually:"
-        say "  $path_line"
-        say "  $hook_line"
+        say "  $startup_path_line"
+        say "  $startup_hook_line"
     fi
 }
 
@@ -180,11 +194,31 @@ elif [ "$shell_name" = bash ]; then
     else
         setup_shell_file "$HOME_DIR/.bashrc"
     fi
+elif [ "$shell_name" = fish ]; then
+    if [ "$install_dir" = "$HOME_DIR/.local/bin" ]; then
+        startup_path_line='fish_add_path --prepend "$HOME/.local/bin"'
+    else
+        startup_path_line="fish_add_path --prepend '$install_dir'"
+    fi
+    startup_hook_line='command fak --alias | source'
+    setup_shell_file "$HOME_DIR/.config/fish/config.fish"
+elif [ "$shell_name" = nu ] || [ "$shell_name" = nushell ]; then
+    nushell_config_dir="$HOME_DIR/.config/nushell"
+    nushell_hook_file="$nushell_config_dir/fak.nu"
+    mkdir -p "$nushell_config_dir"
+    FAK_SHELL=nu "$binary" --alias > "$nushell_hook_file"
+    if [ "$install_dir" = "$HOME_DIR/.local/bin" ]; then
+        startup_path_line='$env.PATH = ($env.PATH | prepend ($nu.home-path | path join ".local" "bin"))'
+    else
+        startup_path_line="\$env.PATH = (\$env.PATH | prepend '$install_dir')"
+    fi
+    startup_hook_line="source '$nushell_hook_file'"
+    setup_shell_file "$nushell_config_dir/config.nu"
 else
-    warn "the installer detected '$shell_name'; automatic setup is available for Bash and Zsh"
+    warn "the installer detected '$shell_name'; automatic setup is available for Bash, Zsh, Fish, and Nushell"
     say "Add these lines to your shell startup file:"
-    say "  $path_line"
-    say "  $hook_line"
+    say "  $startup_path_line"
+    say "  $startup_hook_line"
 fi
 
 "$binary" --help >/dev/null

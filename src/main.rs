@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use clap::Parser;
-use fak::{app_alias, fix_command, last_command, show_diff};
+use fak::{app_alias, execute_command, fix_command, last_command, show_diff};
 
 #[derive(Parser, Debug)]
 #[command(name = "fak", about = "Correct previous console commands")]
@@ -61,13 +61,7 @@ async fn main() {
             let mut input = String::new();
             std::io::stdin().read_line(&mut input).ok();
 
-            let status = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&fixed)
-                .stdin(std::process::Stdio::inherit())
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .status();
+            let status = execute_command(&fixed);
 
             match status {
                 Ok(status) => {

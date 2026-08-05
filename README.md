@@ -9,7 +9,7 @@ The release binaries contain the LFM2.5 230M GGUF model. Local mode therefore wo
 - Embedded local LFM2.5 model for offline command correction.
 - Optional NVIDIA NIM, Cerebras, Gemini, and Groq providers.
 - A visible command diff and confirmation prompt before execution.
-- Bash, Zsh, and PowerShell history integration.
+- Bash, Zsh, Fish, Nushell, and PowerShell history integration.
 - Release binaries for Linux, macOS, and Windows on x86_64 and ARM64.
 - Rust code compiled with `unsafe` forbidden.
 
@@ -34,13 +34,13 @@ Every standalone binary and archive has a matching `.sha256` file. Archives also
 
 The installers download the latest release for your operating system and CPU, verify its SHA-256 checksum, install it for your user, add it to `PATH`, and enable the shell history hook. They do not require Rust, Ollama, or a separate model download.
 
-On Linux or macOS, run this from Bash or Zsh:
+On Linux or macOS, run this from Bash, Zsh, Fish, or Nushell:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/Ferrb9579/fak/master/install.sh | sh
 ```
 
-Open a new terminal after the installer finishes. It configures `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc` as appropriate, so this works immediately in the new terminal:
+Open a new terminal after the installer finishes. It configures the startup file for Bash, Zsh, Fish, or Nushell as appropriate, so this works immediately in the new terminal:
 
 ```bash
 git statuss
@@ -54,6 +54,18 @@ irm https://raw.githubusercontent.com/Ferrb9579/fak/master/install.ps1 | iex
 ```
 
 The Windows installer adds `fak.exe` to your user `PATH` and adds a native `fak` function to your PowerShell profile. Git Bash and WSL users should run the Unix installer from Git Bash or WSL instead.
+
+The shell integrations are:
+
+| Shell | Automatic setup | Startup file |
+| --- | --- | --- |
+| Bash | Yes | `~/.bashrc`, `~/.bash_profile`, or `~/.profile` |
+| Zsh | Yes | `~/.zshrc` |
+| Fish | Yes | `~/.config/fish/config.fish` |
+| Nushell | Yes | `~/.config/nushell/config.nu` and `fak.nu` |
+| PowerShell | Yes | `$PROFILE` |
+
+The release binaries themselves run on Linux, macOS, and Windows for x86_64 and ARM64. Shell integration is separate from the operating system: use the installer for the shell you actually open.
 
 The installers use the latest published release by default. To install a specific release, set `FAK_VERSION` before running the installer:
 
@@ -206,6 +218,27 @@ Run the append command only once. If the line is already present, just open a ne
 
 If your Bash terminal is configured as a login shell, place the same line in `~/.bash_profile` or `~/.profile` instead. Git Bash uses the Bash instructions.
 
+For Fish, add this to `~/.config/fish/config.fish`:
+
+```fish
+command fak --alias | source
+```
+
+For Nushell, generate a hook file and source it from `~/.config/nushell/config.nu`:
+
+```nu
+fak --alias | save --force ~/.config/nushell/fak.nu
+source ~/.config/nushell/fak.nu
+```
+
+For PowerShell, the Windows installer adds the hook automatically. For a manual setup on Windows, run:
+
+```powershell
+Invoke-Expression (& fak.exe --alias)
+```
+
+The generated hook reads the current shell's history, asks the embedded model for a correction, and executes it in that same shell. Fish replaces the interactive command line before executing the correction, so the corrected command is retained by Fish history.
+
 To enable it only in the current terminal without editing a startup file:
 
 ```bash
@@ -220,7 +253,7 @@ On Linux or macOS, remove only the installed binary:
 rm -f ~/.local/bin/fak
 ```
 
-Then remove the exact `eval "$(command fak --alias)"` line from any startup file where the installer added it, such as `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc`. Remove the `~/.local/bin` `PATH` line too if it was added only for `fak`. Open a new terminal afterward.
+Then remove the exact hook line from any startup file where the installer added it, such as `~/.bashrc`, `~/.bash_profile`, `~/.profile`, `~/.zshrc`, `~/.config/fish/config.fish`, or `~/.config/nushell/config.nu`. Remove `~/.config/nushell/fak.nu` if it exists. Remove the `PATH` line too if it was added only for `fak`. Open a new terminal afterward.
 
 On Windows, the one-command installer uses `$env:LOCALAPPDATA\Programs\fak`. Remove it and remove that directory from your user `PATH`:
 
@@ -230,7 +263,7 @@ Remove-Item "$env:LOCALAPPDATA\Programs\fak" -Recurse -Force
 
 Also remove the block between `# >>> fak shell integration >>>` and `# <<< fak shell integration <<<` from `$PROFILE`. For Git Bash or WSL, remove the generated hook line from the relevant Bash or Zsh startup file.
 
-## Use it from Bash or Zsh
+## Use it from a supported shell
 
 Now correct the most recent command:
 
@@ -261,7 +294,7 @@ source ~/.bashrc
 fix git stats
 ```
 
-The same custom-alias command can be placed in `~/.zshrc`. Replace `fix` with the function name you want.
+The same custom-alias command can be placed in `~/.zshrc`. For Fish, use `command fak --alias=fix | source` in `~/.config/fish/config.fish`. For Nushell, generate the file with `fak --alias=fix | save --force ~/.config/nushell/fak.nu` and source it from `config.nu`. Replace `fix` with the function name you want.
 
 ## Safety and privacy
 
@@ -293,10 +326,23 @@ The resulting binary is `target/release/fak` on Unix-like systems and `target/re
 
 ### `FAK_HISTORY` is missing
 
-The shell function has not been loaded. Run:
+The shell function has not been loaded. Use the command for your shell:
 
 ```bash
 eval "$(fak --alias)"
+```
+
+```fish
+command fak --alias | source
+```
+
+```nu
+fak --alias | save --force ~/.config/nushell/fak.nu
+source ~/.config/nushell/fak.nu
+```
+
+```powershell
+Invoke-Expression (& fak.exe --alias)
 ```
 
 Then run `fak` again.

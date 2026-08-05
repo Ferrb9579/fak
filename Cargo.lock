@@ -2672,7 +2672,7 @@ dependencies = [
 
 [[package]]
 name = "fak"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "clap",
  "dotenvy",

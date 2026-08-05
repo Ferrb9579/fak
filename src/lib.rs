@@ -6,6 +6,7 @@ pub mod nvidia;
 
 use std::env;
 use std::path::Path;
+use std::process::{Command, ExitStatus, Stdio};
 
 use rig::client::CompletionClient;
 use rig::completion::Prompt;
@@ -17,13 +18,110 @@ fn binary_path() -> String {
         .ok()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "fak".to_string())
-        .replace('\'', "'\\''")
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn fish_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn nushell_quote(value: &str) -> String {
+    let mut hashes = 1;
+    loop {
+        let marker = "#".repeat(hashes);
+        if !value.contains(&format!("'{}", marker)) {
+            return format!("r{marker}'{value}'{marker}");
+        }
+        hashes += 1;
+    }
+}
+
+fn safe_alias_name(alias_name: &str) -> &str {
+    if !alias_name.is_empty()
+        && alias_name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && !alias_name
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_digit())
+    {
+        alias_name
+    } else {
+        "fak"
+    }
+}
+
+fn shell_name(value: &str) -> String {
+    let name = value.rsplit(['/', '\\']).next().unwrap_or(value);
+    let lower = name.to_ascii_lowercase();
+    lower.trim_end_matches(".exe").to_string()
+}
+
+fn is_shell_name(name: &str) -> bool {
+    matches!(
+        name,
+        "ash"
+            | "bash"
+            | "cmd"
+            | "csh"
+            | "dash"
+            | "fish"
+            | "ksh"
+            | "mksh"
+            | "nu"
+            | "nushell"
+            | "powershell"
+            | "pwsh"
+            | "sh"
+            | "tcsh"
+            | "zsh"
+    )
+}
+
+#[cfg(unix)]
+fn parent_shell() -> Option<String> {
+    let mut pid = std::process::id().to_string();
+
+    for _ in 0..8 {
+        let output = Command::new("ps")
+            .args(["-p", &pid, "-o", "ppid=,comm="])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut fields = stdout.split_whitespace();
+        let parent_pid = fields.next()?.to_string();
+        let command = fields.next()?;
+        let name = shell_name(command);
+
+        if is_shell_name(&name) {
+            return Some(name);
+        }
+        if parent_pid == pid || parent_pid == "0" {
+            break;
+        }
+        pid = parent_pid;
+    }
+
+    None
 }
 
 pub fn app_alias(alias_name: &str) -> String {
-    let bin = binary_path();
+    let shell = detect_shell();
+    app_alias_for_shell(alias_name, &shell, &binary_path())
+}
 
-    match detect_shell().as_str() {
+fn app_alias_for_shell(alias_name: &str, shell: &str, bin: &str) -> String {
+    let name = safe_alias_name(alias_name);
+
+    match shell {
         "zsh" => format!(
             r#"
 {name} () {{
@@ -31,7 +129,7 @@ pub fn app_alias(alias_name: &str) -> String {
     export FAK_ALIAS={name};
     export FAK_HISTORY="$(fc -ln -10)";
     local _fak_fixed
-    _fak_fixed="$('{bin}' --shell-command "$@")"
+    _fak_fixed="$({bin} --shell-command "$@")"
     local _fak_status=$?
     unset FAK_HISTORY FAK_SHELL FAK_ALIAS;
     if (( _fak_status != 0 || -z "$_fak_fixed" )); then
@@ -41,8 +139,84 @@ pub fn app_alias(alias_name: &str) -> String {
     eval "$_fak_fixed"
 }}
 "#,
-            name = alias_name,
-            bin = bin
+            name = name,
+            bin = shell_quote(bin)
+        ),
+        "fish" => format!(
+            r#"
+function {name}
+    set -lx FAK_SHELL fish
+    set -lx FAK_ALIAS '{name}'
+    set -lx FAK_HISTORY (history --reverse --max=10 | string collect)
+    set -l _fak_fixed ({bin} --shell-command $argv | string collect)
+    set -l _fak_status $pipestatus[1]
+    if test $_fak_status -ne 0; or test -z "$_fak_fixed"
+        return $_fak_status
+    end
+    if status is-interactive
+        commandline --replace -- "$_fak_fixed"
+        commandline --function execute
+    else
+        eval "$_fak_fixed"
+    end
+end
+"#,
+            name = name,
+            bin = fish_quote(bin)
+        ),
+        "nu" | "nushell" => format!(
+            r#"
+def --wrapped {name} [...args] {{
+    let history_text = (history | last 10 | get command | str join (char newline))
+    let fixed = (with-env {{
+        FAK_SHELL: "nu",
+        FAK_ALIAS: "{name}",
+        FAK_HISTORY: $history_text,
+    }} {{
+        ^{bin} --shell-command ...$args
+    }} | str trim)
+    if ($fixed | is-empty) {{
+        return
+    }}
+    $fixed | history import
+    ^nu -c $fixed
+}}
+"#,
+            name = name,
+            bin = nushell_quote(bin)
+        ),
+        "powershell" | "pwsh" | "powershell.exe" | "pwsh.exe" => format!(
+            r#"
+function {name} {{
+    $oldHistory = $env:FAK_HISTORY
+    $oldShell = $env:FAK_SHELL
+    $oldAlias = $env:FAK_ALIAS
+    try {{
+        $env:FAK_SHELL = 'powershell'
+        $env:FAK_ALIAS = '{name}'
+        $historyLines = @(Get-History -Count 10 | ForEach-Object {{ $_.CommandLine }})
+        $env:FAK_HISTORY = ($historyLines -join [Environment]::NewLine)
+        $fixedOutput = & {bin} --shell-command @args
+        $status = $LASTEXITCODE
+        $fixed = ($fixedOutput -join [Environment]::NewLine).Trim()
+        if ($status -ne 0 -or [string]::IsNullOrWhiteSpace($fixed)) {{
+            return
+        }}
+        try {{
+            [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($fixed)
+        }} catch {{
+            # PSReadLine is optional; command execution still works without it.
+        }}
+        Invoke-Expression $fixed
+    }} finally {{
+        if ($null -eq $oldHistory) {{ Remove-Item Env:FAK_HISTORY -ErrorAction SilentlyContinue }} else {{ $env:FAK_HISTORY = $oldHistory }}
+        if ($null -eq $oldShell) {{ Remove-Item Env:FAK_SHELL -ErrorAction SilentlyContinue }} else {{ $env:FAK_SHELL = $oldShell }}
+        if ($null -eq $oldAlias) {{ Remove-Item Env:FAK_ALIAS -ErrorAction SilentlyContinue }} else {{ $env:FAK_ALIAS = $oldAlias }}
+    }}
+}}
+"#,
+            name = name,
+            bin = powershell_quote(bin)
         ),
         _ => format!(
             r#"
@@ -51,7 +225,7 @@ function {name} () {{
     export FAK_ALIAS={name};
     export FAK_HISTORY=$(fc -ln -10);
     local _fak_fixed
-    _fak_fixed="$('{bin}' --shell-command "$@")"
+    _fak_fixed="$({bin} --shell-command "$@")"
     local _fak_status=$?
     unset FAK_HISTORY FAK_SHELL FAK_ALIAS;
     if [ "$_fak_status" -ne 0 ] || [ -z "$_fak_fixed" ]; then
@@ -61,25 +235,75 @@ function {name} () {{
     eval "$_fak_fixed"
 }}
 "#,
-            name = alias_name,
-            bin = bin
+            name = name,
+            bin = shell_quote(bin)
         ),
     }
 }
 
 pub fn detect_shell() -> String {
     if let Ok(shell) = env::var("FAK_SHELL") {
+        return shell_name(&shell);
+    }
+    #[cfg(unix)]
+    if let Some(shell) = parent_shell() {
         return shell;
     }
-    env::var("SHELL")
-        .ok()
-        .and_then(|s| {
-            Path::new(&s)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|s| s.to_string())
-        })
-        .unwrap_or_else(|| "bash".to_string())
+    if let Some(shell) = env::var("SHELL").ok().and_then(|shell| {
+        Path::new(&shell)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(shell_name)
+    }) {
+        return shell;
+    }
+
+    if cfg!(windows) {
+        "powershell".to_string()
+    } else {
+        "bash".to_string()
+    }
+}
+
+pub fn execute_command(command: &str) -> std::io::Result<ExitStatus> {
+    let shell = detect_shell();
+    let mut process = match shell.as_str() {
+        "powershell" | "powershell.exe" => Command::new(if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "pwsh"
+        }),
+        "pwsh" | "pwsh.exe" => Command::new("pwsh"),
+        "cmd" | "cmd.exe" => {
+            let mut process = Command::new("cmd.exe");
+            process.args(["/D", "/S", "/C"]);
+            process
+        }
+        "fish" => Command::new("fish"),
+        "nu" | "nushell" => Command::new("nu"),
+        _ => {
+            let program = env::var("SHELL").unwrap_or_else(|_| shell.clone());
+            Command::new(program)
+        }
+    };
+
+    match shell.as_str() {
+        "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => {
+            process.args(["-NoProfile", "-Command", command]);
+        }
+        "cmd" | "cmd.exe" => {
+            process.arg(command);
+        }
+        _ => {
+            process.args(["-c", command]);
+        }
+    }
+
+    process
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
 }
 
 pub fn last_command(forced: &[String]) -> Result<String, String> {
@@ -264,4 +488,46 @@ pub fn show_diff(original: &str, corrected: &str) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_alias_for_shell;
+
+    #[test]
+    fn renders_a_fish_history_hook() {
+        let alias = app_alias_for_shell("fak", "fish", "/tmp/fak");
+
+        assert!(alias.contains("set -lx FAK_SHELL fish"));
+        assert!(alias.contains("history --reverse --max=10"));
+        assert!(alias.contains("commandline --function execute"));
+    }
+
+    #[test]
+    fn renders_a_powershell_history_hook() {
+        let alias = app_alias_for_shell("fak", "powershell", "C:\\Tools\\fak.exe");
+
+        assert!(alias.contains("$env:FAK_SHELL = 'powershell'"));
+        assert!(alias.contains("Get-History -Count 10"));
+        assert!(alias.contains("Invoke-Expression $fixed"));
+        assert!(alias.contains("'C:\\Tools\\fak.exe'"));
+    }
+
+    #[test]
+    fn renders_a_nushell_history_hook() {
+        let alias = app_alias_for_shell("fak", "nu", "/tmp/fak");
+
+        assert!(alias.contains("def --wrapped fak [...args]"));
+        assert!(alias.contains("history | last 10 | get command"));
+        assert!(alias.contains("FAK_SHELL: \"nu\""));
+        assert!(alias.contains("^r#'/tmp/fak'# --shell-command ...$args"));
+    }
+
+    #[test]
+    fn invalid_alias_names_fall_back_to_fak() {
+        let alias = app_alias_for_shell("bad-name", "fish", "/tmp/fak");
+
+        assert!(alias.contains("function fak"));
+        assert!(!alias.contains("function bad-name"));
+    }
 }
