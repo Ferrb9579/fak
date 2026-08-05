@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 env:
-  # Pin the model revision so a future Hugging Face update cannot silently
-  # change the bytes embedded in a release binary.
+  # Keep the model bytes in an immutable repository release asset so a future
+  # Hugging Face update or resolver rate limit cannot affect release builds.
   MODEL_REVISION: fa224d4cb60cffe61eb58726712ef255bb64d0b7
-  MODEL_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LFM2.5-230M-Q4_K_M.gguf?download=true"
-  MODEL_LICENSE_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LICENSE?download=true"
+  MODEL_URL: "https://github.com/Ferrb9579/fak/releases/download/model-source-v1/LFM2.5-230M-Q4_K_M.gguf"
+  MODEL_LICENSE_URL: "https://github.com/Ferrb9579/fak/releases/download/model-source-v1/LICENSE-MODEL.txt"
   MODEL_SHA256: 7bbd90384d3deffe4c646ec9643b212802d32d4ce417c90a1ec9282100650062
   MODEL_PATH: models/LFM2.5-230M.Q4_K_M.gguf
   LLAMA_LIB_PROFILE: Release
