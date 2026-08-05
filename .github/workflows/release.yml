@@ -127,10 +127,12 @@ jobs:
           brew install cmake llvm libomp
           llvm_prefix="$(brew --prefix llvm)"
           omp_prefix="$(brew --prefix libomp)"
-          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          # Homebrew LLVM can reject enum declarations in the Apple SDK.
+          # Use Apple's compiler for native sources and Homebrew LLVM only
+          # for libclang, while OpenMP comes from libomp.
           echo "LIBCLANG_PATH=$llvm_prefix/lib" >> "$GITHUB_ENV"
-          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
           echo "OpenMP_ROOT=$omp_prefix" >> "$GITHUB_ENV"
 
       - name: Check Windows native build tools
