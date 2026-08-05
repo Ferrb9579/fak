@@ -25,14 +25,15 @@ static MODEL_GGUF: &[u8] = include_bytes!(concat!(
 pub fn fix_command(cmd: &str, preamble: &str) -> Result<String, String> {
     let prompt = format!(
         concat!(
-            "<|im_start|>system\n{preamble}<|im_end|>\n",
-            "<|im_start|>user\nInput: ggit status<|im_end|>\n",
-            "<|im_start|>assistant\ngit status<|im_end|>\n",
-            "<|im_start|>user\nInput: crago check<|im_end|>\n",
-            "<|im_start|>assistant\ncargo check<|im_end|>\n",
-            "<|im_start|>user\nInput: git stats<|im_end|>\n",
-            "<|im_start|>assistant\ngit status<|im_end|>\n",
-            "<|im_start|>user\nInput: {cmd}<|im_end|>\n",
+            "<|im_start|>system\n{preamble}\n",
+            "Preserve the intended program and arguments; change only spelling mistakes.\n",
+            "Examples:\n",
+            "Input: ggit status\nOutput: git status\n",
+            "Input: git statuss\nOutput: git status\n",
+            "Input: crago check\nOutput: cargo check\n",
+            "Input: git stats\nOutput: git status\n",
+            "<|im_end|>\n",
+            "<|im_start|>user\nInput: {cmd}\nOutput:<|im_end|>\n",
             "<|im_start|>assistant\n"
         ),
         preamble = preamble,
@@ -90,7 +91,14 @@ pub fn fix_command(cmd: &str, preamble: &str) -> Result<String, String> {
         .decode(&mut batch)
         .map_err(|e| format!("llama.cpp prompt evaluation failed: {e}"))?;
 
-    let mut sampler = LlamaSampler::greedy();
+    // Use LFM2.5's published repetition penalty and deterministic decoding so
+    // the same typo produces the same model-generated correction every time.
+    let mut sampler = LlamaSampler::chain_simple([
+        LlamaSampler::top_k(50),
+        LlamaSampler::temp(0.1),
+        LlamaSampler::penalties(-1, 1.05, 0.0, 0.0),
+        LlamaSampler::greedy(),
+    ]);
     let mut decoder = UTF_8.new_decoder();
     let mut response = String::new();
 
@@ -125,21 +133,131 @@ fn clean_response(response: String) -> String {
     let response = response
         .rsplit_once("</think>")
         .map_or(response.as_str(), |(_, answer)| answer);
-    let response = response.trim();
     let response = response
-        .split_once("Output:")
-        .map_or(response, |(_, answer)| answer);
-    let response = response
-        .split_once("corrected command:")
-        .map_or(response, |(_, answer)| answer);
+        .split_once("<|im_end|>")
+        .map_or(response, |(answer, _)| answer)
+        .trim();
 
-    response
+    // Small instruction-tuned models sometimes wrap the answer in a label,
+    // a sentence, or inline code even when asked for plain text. Extract the
+    // model's answer; do not invent or rewrite a command here.
+    for line in response
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .find(|line| !line.to_ascii_lowercase().contains("here's the corrected"))
-        .unwrap_or_default()
-        .trim_matches(|character| matches!(character, '`' | '*'))
+    {
+        if let Some(value) = after_output_marker(line) {
+            if let Some(command) = extract_inline_code(value) {
+                return command;
+            }
+            let value = clean_candidate(value);
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+
+    for line in response
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if let Some(command) = extract_inline_code(line) {
+            return command;
+        }
+
+        let lower = line.to_ascii_lowercase();
+        if !lower.starts_with("input:")
+            && !lower.starts_with("wrong:")
+            && !lower.contains("the command")
+            && !lower.contains("the input")
+            && !lower.contains("the output")
+            && !lower.contains("corrected command")
+            && !lower.contains("correct command")
+            && !lower.contains("explanation")
+            && !lower.contains("here's")
+        {
+            let value = clean_candidate(line);
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+
+    String::new()
+}
+
+fn after_output_marker(line: &str) -> Option<&str> {
+    const MARKERS: [&str; 7] = [
+        "output is:",
+        "output:",
+        "corrected command is:",
+        "corrected command:",
+        "correct:",
+        "answer:",
+        "command:",
+    ];
+
+    let lower = line.to_ascii_lowercase();
+    MARKERS.iter().find_map(|marker| {
+        lower
+            .find(marker)
+            .map(|index| &line[index + marker.len()..])
+    })
+}
+
+fn extract_inline_code(value: &str) -> Option<String> {
+    let mut result = None;
+    let mut start = 0;
+
+    while let Some(open_offset) = value[start..].find('`') {
+        let open = start + open_offset + 1;
+        let close = value[open..].find('`')? + open;
+        let candidate = clean_candidate(&value[open..close]);
+        if !candidate.is_empty() {
+            result = Some(candidate);
+        }
+        start = close + 1;
+    }
+
+    result
+}
+
+fn clean_candidate(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|character| matches!(character, '`' | '*' | '"'))
         .trim()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_response;
+
+    #[test]
+    fn extracts_a_labeled_model_command() {
+        assert_eq!(
+            clean_response("Output: git status".to_string()),
+            "git status"
+        );
+    }
+
+    #[test]
+    fn extracts_the_last_inline_answer_from_a_model_sentence() {
+        assert_eq!(
+            clean_response(
+                "The input is `git statuss` and the output is `git status`.".to_string()
+            ),
+            "git status"
+        );
+    }
+
+    #[test]
+    fn extracts_a_command_from_a_markdown_answer() {
+        assert_eq!(
+            clean_response("The corrected command is:\n\n`git status`".to_string()),
+            "git status"
+        );
+    }
 }
