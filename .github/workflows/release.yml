@@ -73,26 +73,32 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
             artifact: fak-linux-x86_64
+            binary: fak-linux-x86_64
             archive: fak-linux-x86_64.tar.gz
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             artifact: fak-linux-aarch64
+            binary: fak-linux-aarch64
             archive: fak-linux-aarch64.tar.gz
           - target: x86_64-apple-darwin
             runner: macos-15-intel
             artifact: fak-macos-x86_64
+            binary: fak-macos-x86_64
             archive: fak-macos-x86_64.tar.gz
           - target: aarch64-apple-darwin
             runner: macos-15
             artifact: fak-macos-aarch64
+            binary: fak-macos-aarch64
             archive: fak-macos-aarch64.tar.gz
           - target: x86_64-pc-windows-msvc
             runner: windows-2025
             artifact: fak-windows-x86_64
+            binary: fak-windows-x86_64.exe
             archive: fak-windows-x86_64.zip
           - target: aarch64-pc-windows-msvc
             runner: windows-11-arm
             artifact: fak-windows-aarch64
+            binary: fak-windows-aarch64.exe
             archive: fak-windows-aarch64.zip
     runs-on: ${{ matrix.runner }}
     steps:
@@ -200,6 +206,9 @@ jobs:
           install -m 0755 \
             "target/${{ matrix.target }}/release/fak" \
             "$package_dir/fak"
+          install -m 0755 \
+            "target/${{ matrix.target }}/release/fak" \
+            "dist/${{ matrix.binary }}"
           cp LICENSE-MODEL.txt "$package_dir/"
           tar -C dist -czf "dist/${{ matrix.archive }}" "${{ matrix.artifact }}"
           (
@@ -210,6 +219,14 @@ jobs:
               shasum -a 256 "${{ matrix.archive }}"
             fi
           ) > "dist/${{ matrix.archive }}.sha256"
+          (
+            cd dist
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${{ matrix.binary }}"
+            else
+              shasum -a 256 "${{ matrix.binary }}"
+            fi
+          ) > "dist/${{ matrix.binary }}.sha256"
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
@@ -217,12 +234,16 @@ jobs:
         run: |
           $packageDir = Join-Path $env:GITHUB_WORKSPACE "dist/${{ matrix.artifact }}"
           $archive = Join-Path $env:GITHUB_WORKSPACE "dist/${{ matrix.archive }}"
+          $standalone = Join-Path $env:GITHUB_WORKSPACE "dist/${{ matrix.binary }}"
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/fak.exe" (Join-Path $packageDir "fak.exe")
+          Copy-Item "target/${{ matrix.target }}/release/fak.exe" $standalone
           Copy-Item "LICENSE-MODEL.txt" (Join-Path $packageDir "LICENSE-MODEL.txt")
           Compress-Archive -Path $packageDir -DestinationPath $archive -Force
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  ${{ matrix.archive }}" | Set-Content "${archive}.sha256" -NoNewline
+          $binaryHash = (Get-FileHash $standalone -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$binaryHash  ${{ matrix.binary }}" | Set-Content "${standalone}.sha256" -NoNewline
 
       - name: Upload release files
         uses: actions/upload-artifact@v4
@@ -265,5 +286,10 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             dist/*.tar.gz \
             dist/*.zip \
+            dist/fak-linux-x86_64 \
+            dist/fak-linux-aarch64 \
+            dist/fak-macos-x86_64 \
+            dist/fak-macos-aarch64 \
+            dist/*.exe \
             dist/*.sha256 \
             --clobber
