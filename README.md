@@ -84,7 +84,7 @@ Expand-Archive .\fak-windows-x86_64.zip -DestinationPath .
 
 You can move the extracted folder to a permanent location and add that folder to your user `PATH` if you want to run `fak.exe` from anywhere.
 
-The generated shell hook currently supports Bash and Zsh. For automatic history integration on Windows, use Git Bash or WSL. A native PowerShell hook is not included in `v1.0.0` yet.
+The generated shell hook currently supports Bash and Zsh. For automatic history integration on Windows, use Git Bash or WSL. A native PowerShell hook is not included.
 
 ## Verify a download
 
@@ -145,7 +145,7 @@ Default remote models are:
 - Gemini: `gemma-4-31b-it`
 - Groq: `llama-3.3-70b-versatile`
 
-If `FAK_PROVIDER` is not set, `fak` selects the first configured provider in this order: Gemini, Groq, Cerebras, then NVIDIA. Setting `FAK_PROVIDER` explicitly is recommended.
+If `FAK_PROVIDER` is not set, `fak` uses the embedded local model. Remote providers are never selected automatically; set `FAK_PROVIDER` explicitly when you want one.
 
 Never commit API keys. For local development, `fak` can read an ignored `.env` file, but normal shell environment variables work as well:
 
@@ -182,6 +182,18 @@ To enable it only in the current terminal without editing a startup file:
 ```bash
 eval "$(command fak --alias)"
 ```
+
+## Uninstall
+
+On Linux or macOS, remove only the installed binary:
+
+```bash
+rm -f ~/.local/bin/fak
+```
+
+Then remove the exact `eval "$(command fak --alias)"` line from any startup file where you added it, such as `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc`. If you added a `~/.local/bin` `PATH` line only for `fak`, remove that line too. Open a new terminal afterward.
+
+On Windows, delete the standalone executable or the folder containing the extracted archive. If you added that folder to your user `PATH`, remove that entry. For Git Bash or WSL, also remove the generated hook line from the relevant Bash or Zsh startup file.
 
 ## Use it from Bash or Zsh
 
@@ -254,7 +266,7 @@ eval "$(fak --alias)"
 
 Then run `fak` again.
 
-### An API key error appears in local mode
+### An API key error appears
 
 Select the embedded provider explicitly:
 

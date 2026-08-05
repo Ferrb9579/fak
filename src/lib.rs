@@ -154,16 +154,8 @@ fn detect_provider() -> ProviderType {
             "lfm" | "local" => ProviderType::Local,
             _ => ProviderType::Gemini,
         }
-    } else if env::var("GEMINI_API_KEY").is_ok() {
-        ProviderType::Gemini
-    } else if env::var("GROQ_API_KEY").is_ok() {
-        ProviderType::Groq
-    } else if env::var("CEREBRAS_API_KEY").is_ok() {
-        ProviderType::Cerebras
-    } else if env::var("NVIDIA_API_KEY").is_ok() {
-        ProviderType::Nvidia
     } else {
-        ProviderType::Gemini
+        ProviderType::Local
     }
 }
 
