@@ -121,6 +121,9 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          # Some hosted macOS images include an optional untrusted tap that
+          # blocks unrelated Homebrew installs.
+          brew untap aws/tap >/dev/null 2>&1 || true
           brew install cmake llvm libomp
           llvm_prefix="$(brew --prefix llvm)"
           omp_prefix="$(brew --prefix libomp)"
