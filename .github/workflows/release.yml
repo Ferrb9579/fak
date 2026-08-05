@@ -10,11 +10,11 @@ permissions:
   contents: read
 
 env:
-  # Keep the model bytes in an immutable repository release asset so a future
-  # Hugging Face update or resolver rate limit cannot affect release builds.
+  # Pin the model revision so a future Hugging Face update cannot silently
+  # change the bytes embedded in a release binary.
   MODEL_REVISION: fa224d4cb60cffe61eb58726712ef255bb64d0b7
-  MODEL_URL: "https://github.com/Ferrb9579/fak/releases/download/model-source-v1/LFM2.5-230M-Q4_K_M.gguf"
-  MODEL_LICENSE_URL: "https://github.com/Ferrb9579/fak/releases/download/model-source-v1/LICENSE-MODEL.txt"
+  MODEL_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LFM2.5-230M-Q4_K_M.gguf?download=true"
+  MODEL_LICENSE_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LICENSE?download=true"
   MODEL_SHA256: 7bbd90384d3deffe4c646ec9643b212802d32d4ce417c90a1ec9282100650062
   MODEL_PATH: models/LFM2.5-230M.Q4_K_M.gguf
   LLAMA_LIB_PROFILE: Release
@@ -33,6 +33,8 @@ jobs:
 
       - name: Download and verify model
         shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p models
@@ -41,11 +43,13 @@ jobs:
           # otherwise CI materializes the same model from Hugging Face.
           if [[ ! -f "$MODEL_PATH" ]] || [[ "$(sha256sum "$MODEL_PATH" | awk '{print $1}')" != "$MODEL_SHA256" ]]; then
             curl --fail --location --retry 5 --retry-all-errors \
+              --header "Authorization: Bearer $HF_TOKEN" \
               --output "$MODEL_PATH" "$MODEL_URL"
           fi
 
           echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum --check
           curl --fail --location --retry 5 --retry-all-errors \
+            --header "Authorization: Bearer $HF_TOKEN" \
             --output LICENSE-MODEL.txt "$MODEL_LICENSE_URL"
 
       - name: Upload model for the build matrix
