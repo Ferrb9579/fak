@@ -1,0 +1,16 @@
+[package]
+name = "fak"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.5", features = ["derive"] }
+rig = "0.40.0"
+tokio = { version = "1.53.1", features = ["full"] }
+reqwest = { version = "0.12.12", features = ["json"] }
+serde = { version = "1.0.217", features = ["derive"] }
+dotenvy = "0.15.7"
+similar = "2.7.0"
+encoding_rs = "0.8.35"
+llama-cpp-2 = { version = "0.1.153", features = ["static-openmp", "static-stdcxx"] }
+tempfile = "3.20.0"

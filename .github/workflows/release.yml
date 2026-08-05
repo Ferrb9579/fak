@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pin the model revision so a future Hugging Face update cannot silently
+  # change the bytes embedded in a release binary.
+  MODEL_REVISION: fa224d4cb60cffe61eb58726712ef255bb64d0b7
+  MODEL_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LFM2.5-230M-Q4_K_M.gguf?download=true"
+  MODEL_LICENSE_URL: "https://huggingface.co/LiquidAI/LFM2.5-230M-GGUF/resolve/fa224d4cb60cffe61eb58726712ef255bb64d0b7/LICENSE?download=true"
+  MODEL_SHA256: 7bbd90384d3deffe4c646ec9643b212802d32d4ce417c90a1ec9282100650062
+  MODEL_PATH: models/LFM2.5-230M.Q4_K_M.gguf
+  LLAMA_LIB_PROFILE: Release
+  LLAMA_BUILD_SHARED_LIBS: "0"
+  CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+jobs:
+  prepare-model:
+    name: Prepare embedded model
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Download and verify model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p models
+
+          # A checked-in LFS copy is accepted when it is the pinned revision;
+          # otherwise CI materializes the same model from Hugging Face.
+          if [[ ! -f "$MODEL_PATH" ]] || [[ "$(sha256sum "$MODEL_PATH" | awk '{print $1}')" != "$MODEL_SHA256" ]]; then
+            curl --fail --location --retry 5 --retry-all-errors \
+              --output "$MODEL_PATH" "$MODEL_URL"
+          fi
+
+          echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum --check
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output LICENSE-MODEL.txt "$MODEL_LICENSE_URL"
+
+      - name: Upload model for the build matrix
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-model
+          path: |
+            models/LFM2.5-230M.Q4_K_M.gguf
+            LICENSE-MODEL.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: prepare-model
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            artifact: fak-linux-x86_64
+            archive: fak-linux-x86_64.tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            artifact: fak-linux-aarch64
+            archive: fak-linux-aarch64.tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            artifact: fak-macos-x86_64
+            archive: fak-macos-x86_64.tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            artifact: fak-macos-aarch64
+            archive: fak-macos-aarch64.tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            artifact: fak-windows-x86_64
+            archive: fak-windows-x86_64.zip
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            artifact: fak-windows-aarch64
+            archive: fak-windows-aarch64.zip
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Download prepared model
+        uses: actions/download-artifact@v4
+        with:
+          name: embedded-model
+          path: .
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            clang \
+            cmake \
+            libclang-dev \
+            ninja-build
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install cmake llvm libomp
+          llvm_prefix="$(brew --prefix llvm)"
+          omp_prefix="$(brew --prefix libomp)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "LIBCLANG_PATH=$llvm_prefix/lib" >> "$GITHUB_ENV"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "OpenMP_ROOT=$omp_prefix" >> "$GITHUB_ENV"
+
+      - name: Check Windows native build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --version
+          $llvmBins = @(
+            "C:\Program Files\LLVM\bin",
+            "C:\Program Files (x86)\LLVM\bin"
+          )
+          $llvmBin = $llvmBins | Where-Object { Test-Path (Join-Path $_ "clang.exe") } | Select-Object -First 1
+          if ($null -ne $llvmBin) {
+            $env:Path = "$llvmBin;$env:Path"
+            "${llvmBin}" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            "LIBCLANG_PATH=${llvmBin}" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          clang.exe --version
+
+      - name: Cache Cargo dependencies and native build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/${{ matrix.artifact }}"
+          mkdir -p "$package_dir"
+          install -m 0755 \
+            "target/${{ matrix.target }}/release/fak" \
+            "$package_dir/fak"
+          cp LICENSE-MODEL.txt "$package_dir/"
+          tar -C dist -czf "dist/${{ matrix.archive }}" "${{ matrix.artifact }}"
+          (
+            cd dist
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${{ matrix.archive }}"
+            else
+              shasum -a 256 "${{ matrix.archive }}"
+            fi
+          ) > "dist/${{ matrix.archive }}.sha256"
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE "dist/${{ matrix.artifact }}"
+          $archive = Join-Path $env:GITHUB_WORKSPACE "dist/${{ matrix.archive }}"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/fak.exe" (Join-Path $packageDir "fak.exe")
+          Copy-Item "LICENSE-MODEL.txt" (Join-Path $packageDir "LICENSE-MODEL.txt")
+          Compress-Archive -Path $packageDir -DestinationPath $archive -Force
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.archive }}" | Set-Content "${archive}.sha256" -NoNewline
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --verify-tag \
+              --title "fak $tag" \
+              --generate-notes
+          fi
+          gh release upload "$tag" dist/* --clobber
