@@ -155,15 +155,35 @@ FAK_PROVIDER=local
 # NVIDIA_API_KEY=replace-me
 ```
 
-## Use it from Bash or Zsh
+## Automatic shell integration
 
-Load the shell integration in the current terminal:
+`fak --alias` prints a shell function that connects `fak` to your command history. To enable it automatically in every new terminal, add the evaluation command to your shell startup file.
+
+For Bash, add it to `~/.bashrc`:
 
 ```bash
-eval "$(fak --alias)"
+echo 'eval "$(command fak --alias)"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-To load it automatically, add the same line to `~/.bashrc` or `~/.zshrc`, then open a new terminal.
+For Zsh, add it to `~/.zshrc`:
+
+```zsh
+echo 'eval "$(command fak --alias)"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Run the append command only once. If the line is already present, just open a new terminal or run `source ~/.bashrc` / `source ~/.zshrc`.
+
+If your Bash terminal is configured as a login shell, place the same line in `~/.bash_profile` or `~/.profile` instead. Git Bash uses the Bash instructions.
+
+To enable it only in the current terminal without editing a startup file:
+
+```bash
+eval "$(command fak --alias)"
+```
+
+## Use it from Bash or Zsh
 
 Now correct the most recent command:
 
@@ -189,9 +209,12 @@ fak 'git status | head'
 You can generate an alias with another function name if `fak` is already in use:
 
 ```bash
-eval "$(fak --alias=fix)"
+echo 'eval "$(command fak --alias=fix)"' >> ~/.bashrc
+source ~/.bashrc
 fix git stats
 ```
+
+The same custom-alias command can be placed in `~/.zshrc`. Replace `fix` with the function name you want.
 
 ## Safety and privacy
 
