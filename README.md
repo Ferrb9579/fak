@@ -130,7 +130,7 @@ Remote providers can be selected explicitly with `FAK_PROVIDER`:
 | Gemini | `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` |
 | Groq | `groq` | `GROQ_API_KEY` | `GROQ_MODEL` |
 
-For example, NVIDIA configuration uses `NVIDIA_API_KEY`, not an OpenAI key:
+For example, NVIDIA configuration:
 
 ```bash
 export FAK_PROVIDER=nvidia
