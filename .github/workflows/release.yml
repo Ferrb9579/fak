@@ -257,4 +257,9 @@ jobs:
               --title "fak $tag" \
               --generate-notes
           fi
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" dist/* --clobber
+          gh release upload "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/*.tar.gz \
+            dist/*.zip \
+            dist/*.sha256 \
+            --clobber
