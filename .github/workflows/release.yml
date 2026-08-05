@@ -202,7 +202,7 @@ jobs:
         run: |
           set -euo pipefail
           package_dir="package/${{ matrix.artifact }}"
-          mkdir -p "$package_dir"
+          mkdir -p "$package_dir" dist
           install -m 0755 \
             "target/${{ matrix.target }}/release/fak" \
             "$package_dir/fak"
