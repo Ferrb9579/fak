@@ -201,7 +201,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package_dir="dist/${{ matrix.artifact }}"
+          package_dir="package/${{ matrix.artifact }}"
           mkdir -p "$package_dir"
           install -m 0755 \
             "target/${{ matrix.target }}/release/fak" \
@@ -210,7 +210,7 @@ jobs:
             "target/${{ matrix.target }}/release/fak" \
             "dist/${{ matrix.binary }}"
           cp LICENSE-MODEL.txt "$package_dir/"
-          tar -C dist -czf "dist/${{ matrix.archive }}" "${{ matrix.artifact }}"
+          tar -C package -czf "dist/${{ matrix.archive }}" "${{ matrix.artifact }}"
           (
             cd dist
             if command -v sha256sum >/dev/null 2>&1; then
