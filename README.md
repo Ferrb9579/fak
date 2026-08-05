@@ -9,7 +9,7 @@ The release binaries contain the LFM2.5 230M GGUF model. Local mode therefore wo
 - Embedded local LFM2.5 model for offline command correction.
 - Optional NVIDIA NIM, Cerebras, Gemini, and Groq providers.
 - A visible command diff and confirmation prompt before execution.
-- Bash and Zsh history integration.
+- Bash, Zsh, and PowerShell history integration.
 - Release binaries for Linux, macOS, and Windows on x86_64 and ARM64.
 - Rust code compiled with `unsafe` forbidden.
 
@@ -30,7 +30,38 @@ The standalone files are the actual compiled binaries and are published directly
 
 Every standalone binary and archive has a matching `.sha256` file. Archives also contain `LICENSE-MODEL.txt`.
 
-If you download the Windows archive, the executable is inside the ZIP. After extraction, run:
+## Install with one command
+
+The installers download the latest release for your operating system and CPU, verify its SHA-256 checksum, install it for your user, add it to `PATH`, and enable the shell history hook. They do not require Rust, Ollama, or a separate model download.
+
+On Linux or macOS, run this from Bash or Zsh:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/Ferrb9579/fak/master/install.sh | sh
+```
+
+Open a new terminal after the installer finishes. It configures `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc` as appropriate, so this works immediately in the new terminal:
+
+```bash
+git statuss
+fak
+```
+
+On Windows, run this in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Ferrb9579/fak/master/install.ps1 | iex
+```
+
+The Windows installer adds `fak.exe` to your user `PATH` and adds a native `fak` function to your PowerShell profile. Git Bash and WSL users should run the Unix installer from Git Bash or WSL instead.
+
+The installers use the latest published release by default. To install a specific release, set `FAK_VERSION` before running the installer:
+
+```bash
+FAK_VERSION=v1.0.2 sh -c 'curl --proto "=https" --tlsv1.2 -sSf https://raw.githubusercontent.com/Ferrb9579/fak/master/install.sh | sh'
+```
+
+If you download the Windows archive manually, the executable is inside the ZIP. After extraction, run:
 
 ```text
 fak-windows-x86_64\fak.exe --help
@@ -38,7 +69,7 @@ fak-windows-x86_64\fak.exe --help
 
 The ARM64 archive contains the same `fak.exe` name under `fak-windows-aarch64`.
 
-## Install on Linux or macOS
+## Manual install on Linux or macOS
 
 For example, the following installs the standalone Linux x86_64 binary into `~/.local/bin`:
 
@@ -64,7 +95,7 @@ export PATH="$HOME/.local/bin:$PATH"
 fak --help
 ```
 
-## Install on Windows
+## Manual install on Windows
 
 In PowerShell, you can download the standalone `.exe` directly:
 
@@ -82,9 +113,7 @@ Expand-Archive .\fak-windows-x86_64.zip -DestinationPath .
 .\fak-windows-x86_64\fak.exe --help
 ```
 
-You can move the extracted folder to a permanent location and add that folder to your user `PATH` if you want to run `fak.exe` from anywhere.
-
-The generated shell hook currently supports Bash and Zsh. For automatic history integration on Windows, use Git Bash or WSL. A native PowerShell hook is not included.
+You can move the extracted folder to a permanent location and add that folder to your user `PATH` if you want to run `fak.exe` from anywhere. For automatic history integration, use the one-command installer above. It adds a native PowerShell hook; Git Bash and WSL use the Bash/Zsh hook.
 
 ## Verify a download
 
@@ -157,7 +186,7 @@ FAK_PROVIDER=local
 
 ## Automatic shell integration
 
-`fak --alias` prints a shell function that connects `fak` to your command history. To enable it automatically in every new terminal, add the evaluation command to your shell startup file.
+`fak --alias` prints a shell function that connects `fak` to your command history. The one-command installer adds it automatically. If you install a binary manually, add the evaluation command to your shell startup file.
 
 For Bash, add it to `~/.bashrc`:
 
@@ -191,9 +220,15 @@ On Linux or macOS, remove only the installed binary:
 rm -f ~/.local/bin/fak
 ```
 
-Then remove the exact `eval "$(command fak --alias)"` line from any startup file where you added it, such as `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc`. If you added a `~/.local/bin` `PATH` line only for `fak`, remove that line too. Open a new terminal afterward.
+Then remove the exact `eval "$(command fak --alias)"` line from any startup file where the installer added it, such as `~/.bashrc`, `~/.bash_profile`, `~/.profile`, or `~/.zshrc`. Remove the `~/.local/bin` `PATH` line too if it was added only for `fak`. Open a new terminal afterward.
 
-On Windows, delete the standalone executable or the folder containing the extracted archive. If you added that folder to your user `PATH`, remove that entry. For Git Bash or WSL, also remove the generated hook line from the relevant Bash or Zsh startup file.
+On Windows, the one-command installer uses `$env:LOCALAPPDATA\Programs\fak`. Remove it and remove that directory from your user `PATH`:
+
+```powershell
+Remove-Item "$env:LOCALAPPDATA\Programs\fak" -Recurse -Force
+```
+
+Also remove the block between `# >>> fak shell integration >>>` and `# <<< fak shell integration <<<` from `$PROFILE`. For Git Bash or WSL, remove the generated hook line from the relevant Bash or Zsh startup file.
 
 ## Use it from Bash or Zsh
 
@@ -268,9 +303,10 @@ Then run `fak` again.
 
 ### An API key error appears
 
-Select the embedded provider explicitly:
+An API key is only needed when a remote provider was selected explicitly. Return to the embedded model with:
 
 ```bash
+unset FAK_PROVIDER
 export FAK_PROVIDER=local
 ```
 
