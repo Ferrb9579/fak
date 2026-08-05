@@ -168,7 +168,9 @@ jobs:
           "CMAKE_GENERATOR=Ninja" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CC=$clangCl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CXX=$clangCl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CXXFLAGS=/EHsc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # Use the dash spelling because the Bash shell on Windows rewrites
+          # slash-prefixed flags such as /EHsc into MSYS paths.
+          "CXXFLAGS=-EHsc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $clangCl --version
 
       - name: Cache Cargo dependencies and native build
